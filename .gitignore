@@ -27,3 +27,5 @@ Thumbs.db
 
 # Temporary Files
 temp/
+
+data/raw/uploads/

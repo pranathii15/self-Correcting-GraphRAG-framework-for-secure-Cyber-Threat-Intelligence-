@@ -11,8 +11,6 @@ The LLM generates an answer based on the retrieved information.
 Benefit: Reduces hallucinations and gives more accurate answers.
 
 
-
-
 2. What is GraphRAG?
 GraphRAG is an improved version of RAG.
 Instead of searching only text, it also stores information as a knowledge graph.

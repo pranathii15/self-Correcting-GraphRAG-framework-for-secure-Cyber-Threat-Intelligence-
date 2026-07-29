@@ -11,3 +11,11 @@ def split_documents(documents):
     )
 
     return splitter.split_documents(documents)
+def chunk_text(text):
+
+    splitter = RecursiveCharacterTextSplitter(
+        chunk_size=1000,
+        chunk_overlap=150
+    )
+
+    return splitter.split_text(text)

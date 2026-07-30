@@ -1,7 +1,7 @@
 from fastapi import APIRouter, UploadFile, File, HTTPException
 
-from backend.app.services.file_service import save_uploaded_file
-from backend.app.services.document_pipeline import process_document
+from app.services.file_service import save_uploaded_file
+from app.services.document_pipeline import process_document
 
 router = APIRouter(
     prefix="/documents",

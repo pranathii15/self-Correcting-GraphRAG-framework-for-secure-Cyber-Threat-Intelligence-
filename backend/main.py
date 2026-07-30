@@ -1,6 +1,7 @@
 from fastapi import FastAPI
 
-from backend.app.api.documents import router as documents_router
+from app.api.documents import router as documents_router
+from app.api.auth import router as auth_router
 
 
 app = FastAPI(
@@ -12,8 +13,9 @@ app = FastAPI(
     version="1.0.0"
 )
 
-
+# Register Routers
 app.include_router(documents_router)
+app.include_router(auth_router)
 
 
 @app.get("/")

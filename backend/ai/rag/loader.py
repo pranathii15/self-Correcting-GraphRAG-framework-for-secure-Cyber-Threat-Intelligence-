@@ -38,7 +38,11 @@ def load_json(file_path):
     with open(file_path, "r", encoding="utf-8") as file:
         data = json.load(file)
 
-    # Convert JSON into readable text
+    # CTINexus reports store the article here
+    if isinstance(data, dict) and "text" in data:
+        return data["text"]
+
+    # Fallback for other JSON files
     return json.dumps(data, indent=2)
 
 

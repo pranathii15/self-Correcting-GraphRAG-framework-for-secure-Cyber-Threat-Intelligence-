@@ -40,7 +40,7 @@ def ingest_dataset():
 
             embeddings = generate_embeddings(chunks)
 
-            store_embeddings(chunks, embeddings)
+            store_embeddings(chunks,embeddings,file_path.name)
 
             total_files += 1
             total_chunks += len(chunks)

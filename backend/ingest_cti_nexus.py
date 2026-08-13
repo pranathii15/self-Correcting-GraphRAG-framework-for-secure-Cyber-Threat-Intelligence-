@@ -9,7 +9,7 @@ from ai.vectorstore.qdrant_store import (
     store_embeddings,
 )
 
-DATASET_PATH = Path("../data/cti_nexus")
+DATASET_PATH = Path("../data/cti_nexus/demo")
 
 
 def ingest_dataset():

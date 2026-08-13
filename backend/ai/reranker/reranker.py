@@ -8,13 +8,20 @@ reranker = CrossEncoder(MODEL_NAME)
 def rerank(query, documents, top_k=5):
     """
     Rerank retrieved documents using a CrossEncoder.
+
+    Each document contains:
+        - text
+        - filename
     """
 
-    if len(documents) == 0:
+    if not documents:
         return []
 
     pairs = [
-        (query, document)
+        (
+            query,
+            f"{document['filename']} {document['text']}"
+        )
         for document in documents
     ]
 

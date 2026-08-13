@@ -30,18 +30,46 @@ def search_documents(query: str, limit: int = 5):
     )
 
     documents = [
-        point.payload["text"]
-        for point in results.points
+    {
+        "text": point.payload["text"],
+        "filename": point.payload["filename"]
+    }
+    for point in results.points
     ]
 
     # Remove duplicate chunks
-    documents = list(dict.fromkeys(documents))
+    unique_documents = []
+    seen_texts = set()
+    for document in documents:
+        if document["text"] not in seen_texts:
+            unique_documents.append(document)
+            seen_texts.add(document["text"])
+
+    documents = unique_documents
 
     # Rerank them
     documents = rerank(
         query=query,
         documents=documents,
-        top_k=limit,
+        top_k=50,
     )
 
-    return documents
+    # Limit the number of chunks from the same source file
+    diverse_documents = []
+    source_counts = {}
+
+    MAX_CHUNKS_PER_SOURCE = 2
+
+    for document in documents:
+        filename = document["filename"]
+
+        if source_counts.get(filename, 0) >= MAX_CHUNKS_PER_SOURCE:
+            continue
+
+        diverse_documents.append(document)
+        source_counts[filename] = source_counts.get(filename, 0) + 1
+
+        if len(diverse_documents) >= limit:
+            break
+
+    return diverse_documents

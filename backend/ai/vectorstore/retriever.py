@@ -4,7 +4,7 @@ from qdrant_client import QdrantClient
 from sentence_transformers import SentenceTransformer
 
 from ai.reranker.reranker import rerank
-from ai.graph_rag.pipeline import build_graph_from_file
+from ai.graph_rag.neo4j_store import Neo4jGraph
 
 
 MODEL_NAME = "BAAI/bge-small-en-v1.5"
@@ -103,7 +103,7 @@ def search_documents(query: str, limit: int = 5):
             break
 
     # --------------------------------------------------
-    # 6. Build graph information
+    # 6. Query Neo4j for graph information
     # --------------------------------------------------
 
     graph_results = []
@@ -146,14 +146,18 @@ def search_documents(query: str, limit: int = 5):
         if not file_path.exists():
             continue
 
-        # Build graph from CTINexus JSON
-        graph = build_graph_from_file(
-            str(file_path)
-        )
+        # Read entities from the CTINexus JSON file
+        import json
 
-        graph_data = graph.graph
+        with open(file_path, encoding="utf-8") as file:
+            data = json.load(file)
 
-        for entity_name in graph_data.keys():
+        for entity in data.get("entities", []):
+
+            entity_name = entity.get("entity_name")
+
+            if not entity_name:
+                continue
 
             entity_lower = entity_name.lower().strip()
 
@@ -168,28 +172,30 @@ def search_documents(query: str, limit: int = 5):
             # Prefer the longest / most specific entity
             if len(entity_name) > best_match_length:
 
-                best_match = (
-                    entity_name,
-                    graph
-                )
-
+                best_match = entity_name
                 best_match_length = len(entity_name)
 
     # --------------------------------------------------
-    # 8. Query only the best matching graph entity
+    # 8. Query the best matching entity in Neo4j
     # --------------------------------------------------
 
     if best_match:
 
-        entity_name, graph = best_match
+        neo4j_graph = Neo4jGraph()
 
-        result = graph.query(
-            entity_name
-        )
+        try:
 
-        if result["type"] is not None:
+            result = neo4j_graph.query_entity(
+                best_match
+            )
 
-            graph_results.append(result)
+            if result is not None:
+
+                graph_results.append(result)
+
+        finally:
+
+            neo4j_graph.close()
 
     # --------------------------------------------------
     # 9. Return retrieval + graph

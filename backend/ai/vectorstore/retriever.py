@@ -1,3 +1,6 @@
+
+import re
+import time
 from pathlib import Path
 
 from qdrant_client import QdrantClient
@@ -5,10 +8,12 @@ from sentence_transformers import SentenceTransformer
 
 from ai.reranker.reranker import rerank
 from ai.graph_rag.pipeline import build_graph_from_file
+from ai.agents.query_agent import understand_query
 
 
 MODEL_NAME = "BAAI/bge-small-en-v1.5"
 
+# Model is loaded when this module is imported.
 model = SentenceTransformer(MODEL_NAME)
 
 client = QdrantClient(
@@ -20,21 +25,49 @@ COLLECTION_NAME = "cti_documents"
 
 DATASET_PATH = Path("../data/cti_nexus/demo")
 
+MIN_RERANK_SCORE = 0.05
+
 
 def search_documents(query: str, limit: int = 5):
+    total_start = time.perf_counter()
+    timings = {}
 
     # --------------------------------------------------
-    # 1. Generate query embedding
+    # 1. Understand and improve the user query
     # --------------------------------------------------
+
+    stage_start = time.perf_counter()
+
+    query_info = understand_query(query)
+
+    timings["query_agent"] = time.perf_counter() - stage_start
+
+    original_query = query_info["original_query"]
+    expanded_query = query_info["expanded_query"]
+    used_fallback = query_info.get("used_fallback", False)
+
+    retrieval_query = (
+        original_query if used_fallback else expanded_query
+    )
+
+    # --------------------------------------------------
+    # 2. Generate query embedding
+    # --------------------------------------------------
+
+    stage_start = time.perf_counter()
 
     query_embedding = model.encode(
-        query,
+        retrieval_query,
         normalize_embeddings=True
     ).tolist()
 
+    timings["embedding"] = time.perf_counter() - stage_start
+
     # --------------------------------------------------
-    # 2. Retrieve candidates from Qdrant
+    # 3. Retrieve candidates from Qdrant
     # --------------------------------------------------
+
+    stage_start = time.perf_counter()
 
     results = client.query_points(
         collection_name=COLLECTION_NAME,
@@ -50,36 +83,63 @@ def search_documents(query: str, limit: int = 5):
         for point in results.points
     ]
 
+    timings["qdrant_search"] = time.perf_counter() - stage_start
+    candidate_count = len(documents)
+
     # --------------------------------------------------
-    # 3. Remove duplicate chunks
+    # 4. Remove duplicate chunks
     # --------------------------------------------------
+
+    stage_start = time.perf_counter()
 
     unique_documents = []
     seen_texts = set()
 
     for document in documents:
-
         if document["text"] not in seen_texts:
-
             unique_documents.append(document)
             seen_texts.add(document["text"])
 
     documents = unique_documents
 
+    timings["deduplication"] = time.perf_counter() - stage_start
+    unique_count = len(documents)
+
     # --------------------------------------------------
-    # 4. Rerank documents
+    # 5. Rerank documents using the original query
     # --------------------------------------------------
+
+    stage_start = time.perf_counter()
+    RERANK_CANDIDATES = 10
 
     documents = rerank(
-        query=query,
-        documents=documents,
-        top_k=50,
+        query=original_query,
+        documents=documents[:RERANK_CANDIDATES],
+        top_k=RERANK_CANDIDATES,
     )
 
+    timings["reranking"] = time.perf_counter() - stage_start
+
     # --------------------------------------------------
-    # 5. Source diversity
-    #    Maximum 2 chunks per source file
+    # 6. Filter weak matches using reranker scores
     # --------------------------------------------------
+
+    stage_start = time.perf_counter()
+
+    documents = [
+        document
+        for document in documents
+        if document.get("rerank_score", float("-inf"))
+        >= MIN_RERANK_SCORE
+    ]
+
+    timings["score_filtering"] = time.perf_counter() - stage_start
+
+    # --------------------------------------------------
+    # 7. Source diversity
+    # --------------------------------------------------
+
+    stage_start = time.perf_counter()
 
     diverse_documents = []
     source_counts = {}
@@ -87,7 +147,6 @@ def search_documents(query: str, limit: int = 5):
     MAX_CHUNKS_PER_SOURCE = 2
 
     for document in documents:
-
         filename = document["filename"]
 
         if source_counts.get(filename, 0) >= MAX_CHUNKS_PER_SOURCE:
@@ -102,16 +161,16 @@ def search_documents(query: str, limit: int = 5):
         if len(diverse_documents) >= limit:
             break
 
+    timings["source_diversity"] = time.perf_counter() - stage_start
+
     # --------------------------------------------------
-    # 6. Build graph information
+    # 8. Prepare graph matching
     # --------------------------------------------------
 
     graph_results = []
 
-    query_lower = query.lower()
+    query_normalized = " ".join(original_query.casefold().split())
 
-    # Generic entities should not be selected as the
-    # main entity for a specific query.
     GENERIC_ENTITIES = {
         "ransomware",
         "malware",
@@ -130,72 +189,106 @@ def search_documents(query: str, limit: int = 5):
         "networks",
     }
 
+    def entity_matches_query(entity_name: str) -> bool:
+        entity_normalized = " ".join(
+            entity_name.casefold().split()
+        )
+
+        if not entity_normalized:
+            return False
+
+        escaped_entity = re.escape(entity_normalized)
+        pattern = rf"(?<!\w){escaped_entity}(?!\w)"
+
+        return re.search(pattern, query_normalized) is not None
+
     # --------------------------------------------------
-    # 7. Find the best entity matching the query
+    # 9. Build graphs and find the best matching entity
     # --------------------------------------------------
+
+    stage_start = time.perf_counter()
 
     best_match = None
     best_match_length = 0
+    graphs_built = 0
+    graph_entities_checked = 0
 
     for document in diverse_documents:
-
         filename = document["filename"]
-
         file_path = DATASET_PATH / filename
 
         if not file_path.exists():
             continue
 
-        # Build graph from CTINexus JSON
-        graph = build_graph_from_file(
-            str(file_path)
-        )
+        graph = build_graph_from_file(str(file_path))
+        graphs_built += 1
 
         graph_data = graph.graph
 
         for entity_name in graph_data.keys():
+            graph_entities_checked += 1
 
-            entity_lower = entity_name.lower().strip()
+            entity_normalized = " ".join(
+                entity_name.casefold().split()
+            )
 
-            # Ignore generic entities
-            if entity_lower in GENERIC_ENTITIES:
+            if entity_normalized in GENERIC_ENTITIES:
                 continue
 
-            # Entity must actually appear in the query
-            if entity_lower not in query_lower:
+            if not entity_matches_query(entity_name):
                 continue
 
-            # Prefer the longest / most specific entity
-            if len(entity_name) > best_match_length:
+            if len(entity_normalized) > best_match_length:
+                best_match = (entity_name, graph)
+                best_match_length = len(entity_normalized)
 
-                best_match = (
-                    entity_name,
-                    graph
-                )
-
-                best_match_length = len(entity_name)
+    timings["graph_build_and_matching"] = time.perf_counter() - stage_start
 
     # --------------------------------------------------
-    # 8. Query only the best matching graph entity
+    # 10. Query the best matching graph entity
     # --------------------------------------------------
+
+    stage_start = time.perf_counter()
 
     if best_match:
-
         entity_name, graph = best_match
 
-        result = graph.query(
-            entity_name
-        )
+        result = graph.query(entity_name)
 
         if result["type"] is not None:
-
             graph_results.append(result)
 
+    timings["graph_query"] = time.perf_counter() - stage_start
+
     # --------------------------------------------------
-    # 9. Return retrieval + graph
+    # 11. Log timings
+    # --------------------------------------------------
+
+    total_time = time.perf_counter() - total_start
+
+    print("\n========== RETRIEVER TIMING ==========")
+
+    for stage, duration in timings.items():
+        print(f"{stage:28s}: {duration:8.2f} seconds")
+
+    print(f"{'Qdrant candidates':28s}: {candidate_count}")
+    print(f"{'Unique documents':28s}: {unique_count}")
+    print(f"{'Selected documents':28s}: {len(diverse_documents)}")
+    print(f"{'Graphs built':28s}: {graphs_built}")
+    print(f"{'Graph entities checked':28s}: {graph_entities_checked}")
+    print(f"{'Total retrieval':28s}: {total_time:8.2f} seconds")
+    print("======================================\n")
+
+    # --------------------------------------------------
+    # 12. Return retrieval + graph + query understanding
     # --------------------------------------------------
 
     return {
+        "original_query": original_query,
+        "intent": query_info["intent"],
+        "entities": query_info["entities"],
+        "expanded_query": expanded_query,
+        "used_fallback": used_fallback,
         "documents": diverse_documents,
         "graph": graph_results
     }

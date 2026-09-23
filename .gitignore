@@ -29,3 +29,5 @@ Thumbs.db
 temp/
 
 data/raw/uploads/
+# Runtime uploaded documents
+backend/data/raw/uploads/

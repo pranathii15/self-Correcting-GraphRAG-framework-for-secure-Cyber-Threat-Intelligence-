@@ -1,25 +1,36 @@
+
 # Python
 __pycache__/
 *.py[cod]
-*.pyo
+*.pyo/
 
-# Virtual Environment
+# Virtual Environments
 venv/
 .venv/
+env/
 
-# Environment Variables
+# Environment Variables and Secrets
 .env
+.env.*
+!.env.example
 
 # IDE
 .vscode/
 .idea/
 
-# OS
+# Operating System
 .DS_Store
 Thumbs.db
 
 # Logs
 *.log
+
+# Python Testing and Cache
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
 
 # AI / Vector Database Files
 *.faiss
@@ -28,6 +39,16 @@ Thumbs.db
 # Temporary Files
 temp/
 
+# Runtime Uploaded Documents
 data/raw/uploads/
-# Runtime uploaded documents
 backend/data/raw/uploads/
+
+# Frontend Dependencies and Build Output
+node_modules/
+.next/
+out/
+dist/
+
+# Local Databases and Generated Data
+*.db
+*.sqlite3

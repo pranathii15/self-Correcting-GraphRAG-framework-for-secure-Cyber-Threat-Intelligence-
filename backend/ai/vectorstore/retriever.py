@@ -1,4 +1,5 @@
 
+import json
 import re
 import time
 from pathlib import Path
@@ -7,8 +8,8 @@ from qdrant_client import QdrantClient
 from sentence_transformers import SentenceTransformer
 
 from ai.reranker.reranker import rerank
-from ai.graph_rag.pipeline import build_graph_from_file
 from ai.agents.query_agent import understand_query
+from ai.graph_rag.neo4j_store import Neo4jGraph
 
 
 MODEL_NAME = "BAAI/bge-small-en-v1.5"
@@ -203,14 +204,13 @@ def search_documents(query: str, limit: int = 5):
         return re.search(pattern, query_normalized) is not None
 
     # --------------------------------------------------
-    # 9. Build graphs and find the best matching entity
+    # 9. Find the best matching entity in retrieved files
     # --------------------------------------------------
 
     stage_start = time.perf_counter()
 
     best_match = None
     best_match_length = 0
-    graphs_built = 0
     graph_entities_checked = 0
 
     for document in diverse_documents:
@@ -220,12 +220,15 @@ def search_documents(query: str, limit: int = 5):
         if not file_path.exists():
             continue
 
-        graph = build_graph_from_file(str(file_path))
-        graphs_built += 1
+        with open(file_path, encoding="utf-8") as file:
+            data = json.load(file)
 
-        graph_data = graph.graph
+        for entity in data.get("entities", []):
+            entity_name = entity.get("entity_name")
 
-        for entity_name in graph_data.keys():
+            if not entity_name:
+                continue
+
             graph_entities_checked += 1
 
             entity_normalized = " ".join(
@@ -239,24 +242,30 @@ def search_documents(query: str, limit: int = 5):
                 continue
 
             if len(entity_normalized) > best_match_length:
-                best_match = (entity_name, graph)
+                best_match = entity_name
                 best_match_length = len(entity_normalized)
 
-    timings["graph_build_and_matching"] = time.perf_counter() - stage_start
+    timings["graph_build_and_matching"] = (
+        time.perf_counter() - stage_start
+    )
 
     # --------------------------------------------------
-    # 10. Query the best matching graph entity
+    # 10. Query Neo4j for the matching entity
     # --------------------------------------------------
 
     stage_start = time.perf_counter()
 
     if best_match:
-        entity_name, graph = best_match
+        neo4j_graph = Neo4jGraph()
 
-        result = graph.query(entity_name)
+        try:
+            result = neo4j_graph.query_entity(best_match)
 
-        if result["type"] is not None:
-            graph_results.append(result)
+            if result is not None:
+                graph_results.append(result)
+
+        finally:
+            neo4j_graph.close()
 
     timings["graph_query"] = time.perf_counter() - stage_start
 
@@ -274,7 +283,6 @@ def search_documents(query: str, limit: int = 5):
     print(f"{'Qdrant candidates':28s}: {candidate_count}")
     print(f"{'Unique documents':28s}: {unique_count}")
     print(f"{'Selected documents':28s}: {len(diverse_documents)}")
-    print(f"{'Graphs built':28s}: {graphs_built}")
     print(f"{'Graph entities checked':28s}: {graph_entities_checked}")
     print(f"{'Total retrieval':28s}: {total_time:8.2f} seconds")
     print("======================================\n")

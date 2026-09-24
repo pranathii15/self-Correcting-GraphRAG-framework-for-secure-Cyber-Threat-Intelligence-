@@ -29,3 +29,33 @@ Thumbs.db
 temp/
 
 data/raw/uploads/
+
+# Environment variables and secrets
+.env
+.env.*
+!.env.example
+
+# Python virtual environments
+venv/
+.venv/
+env/
+
+# Python cache and compiled files
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Logs
+*.log
+
+# Frontend dependencies and builds
+node_modules/
+.next/
+out/
+dist/
+
+# Local databases, indexes, and generated data
+*.db
+*.sqlite3
+
+/backend/data/raw/uploads/

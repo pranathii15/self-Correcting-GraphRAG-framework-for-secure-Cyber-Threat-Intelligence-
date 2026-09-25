@@ -1,32 +1,29 @@
-
+import os
 import json
 import re
 import time
 from pathlib import Path
-
+from dotenv import load_dotenv
 from qdrant_client import QdrantClient
 from sentence_transformers import SentenceTransformer
 
 from ai.reranker.reranker import rerank
 from ai.agents.query_agent import understand_query
 from ai.graph_rag.neo4j_store import Neo4jGraph
-
+load_dotenv()
 
 MODEL_NAME = "BAAI/bge-small-en-v1.5"
-
+QDRANT_URL = os.getenv("QDRANT_URL")
+QDRANT_API_KEY = os.getenv("QDRANT_API_KEY")
+client = QdrantClient(
+    url=QDRANT_URL,
+    api_key=QDRANT_API_KEY,
+)
+COLLECTION_NAME = "cti_documents"
+DATASET_PATH = Path("../data/cti_nexus/demo")
+MIN_RERANK_SCORE = 0.05
 # Model is loaded when this module is imported.
 model = SentenceTransformer(MODEL_NAME)
-
-client = QdrantClient(
-    host="localhost",
-    port=6333
-)
-
-COLLECTION_NAME = "cti_documents"
-
-DATASET_PATH = Path("../data/cti_nexus/demo")
-
-MIN_RERANK_SCORE = 0.05
 
 
 def search_documents(query: str, limit: int = 5):

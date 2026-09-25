@@ -14,7 +14,7 @@ API_KEY = os.getenv("GEMINI_API_KEY")
 # Create Gemini client only when an API key is available
 client = genai.Client(api_key=API_KEY) if API_KEY else None
 
-MODEL_NAME = "gemini-2.5-flash"
+MODEL_NAME = "gemini-3.8-flash"
 
 
 def _fallback_query(user_query: str):

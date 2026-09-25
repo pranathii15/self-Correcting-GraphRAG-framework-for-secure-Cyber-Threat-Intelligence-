@@ -1,4 +1,3 @@
-
 import os
 import json
 
@@ -37,12 +36,14 @@ def understand_query(user_query: str):
 
     The original query is preserved for reranking and graph
     matching. If Gemini fails or returns invalid output,
-    retrieval can continue using the original query.
+    retrieval continues using the original query.
     """
 
+    # Validate user query
     if not user_query or not user_query.strip():
         return _fallback_query(user_query)
 
+    # Gemini client unavailable
     if client is None:
         return _fallback_query(user_query)
 
@@ -103,19 +104,26 @@ User query:
     try:
         response = client.models.generate_content(
             model=MODEL_NAME,
-            contents=prompt
+            contents=prompt,
+            config={
+                "http_options": {
+                    "timeout": 10000
+                }
+            },
         )
 
+        # Empty Gemini response
         if not response.text:
             return _fallback_query(user_query)
 
         text = response.text.strip()
 
-        # Remove Markdown code fences if present
+        # Remove Markdown code fences if Gemini adds them
         if text.startswith("```"):
             text = text.replace("```json", "")
             text = text.replace("```", "").strip()
 
+        # Parse JSON
         result = json.loads(text)
 
         required_fields = [
@@ -125,35 +133,81 @@ User query:
             "expanded_query",
         ]
 
+        # Validate response structure
         if not isinstance(result, dict):
             return _fallback_query(user_query)
 
-        if not all(field in result for field in required_fields):
+        if not all(
+            field in result
+            for field in required_fields
+        ):
             return _fallback_query(user_query)
 
-        # Validate field types and reject empty search expansions
-        if not isinstance(result["intent"], str):
+        # Validate field types
+        if not isinstance(
+            result["intent"],
+            str
+        ):
             return _fallback_query(user_query)
 
-        if not isinstance(result["entities"], list):
+        if not isinstance(
+            result["entities"],
+            list
+        ):
             return _fallback_query(user_query)
 
-        if not isinstance(result["expanded_query"], str):
+        if not isinstance(
+            result["expanded_query"],
+            str
+        ):
             return _fallback_query(user_query)
 
         if not result["expanded_query"].strip():
             return _fallback_query(user_query)
 
-        # Preserve the exact user query, regardless of model output
+        # Always preserve the exact user query
         result["original_query"] = user_query
-        result["expanded_query"] = result["expanded_query"].strip()
+
+        # Normalize expanded query
+        result["expanded_query"] = (
+            result["expanded_query"].strip()
+        )
+
+        # Mark successful Gemini processing
         result["used_fallback"] = False
 
         return result
 
     except Exception as error:
-        print(
-            f"Query Agent fallback: "
-            f"{type(error).__name__}: {error}"
-        )
+        error_type = type(error).__name__
+        error_message = str(error)
+
+        # Gemini quota exhausted
+        if (
+            "429" in error_message
+            or "RESOURCE_EXHAUSTED" in error_message
+        ):
+            print(
+                "Query Agent fallback: "
+                "Gemini quota unavailable; "
+                "using fallback query."
+            )
+
+        # Gemini temporarily unavailable
+        elif (
+            "503" in error_message
+            or "UNAVAILABLE" in error_message
+        ):
+            print(
+                "Query Agent fallback: "
+                "Gemini temporarily unavailable; "
+                "using fallback query."
+            )
+
+        # Other errors
+        else:
+            print(
+                f"Query Agent fallback: {error_type}"
+            )
+
         return _fallback_query(user_query)

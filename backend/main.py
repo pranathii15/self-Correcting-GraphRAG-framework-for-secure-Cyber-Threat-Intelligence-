@@ -1,4 +1,5 @@
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.documents import router as documents_router
 from app.api.auth import router as auth_router
@@ -13,6 +14,17 @@ app = FastAPI(
     ),
     version="1.0.0"
 )
+
+
+# CORS configuration
+app.add_middleware(
+    CORSMiddleware,
+    allow_origin_regex=r"https?://(localhost|127\.0\.0\.1|192\.168\.\d+\.\d+)(:\d+)?",
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 
 # Register Routers
 app.include_router(documents_router)

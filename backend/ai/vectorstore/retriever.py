@@ -111,7 +111,7 @@ def search_documents(query: str, limit: int = 5):
     # --------------------------------------------------
 
     stage_start = time.perf_counter()
-    RERANK_CANDIDATES = 10
+    RERANK_CANDIDATES = 5
 
     documents = rerank(
         query=original_query,
@@ -250,22 +250,35 @@ def search_documents(query: str, limit: int = 5):
     )
 
     # --------------------------------------------------
-    # 10. Query Neo4j for the matching entity
+    # 10. Query Neo4j for the matching entity.
+    #     Graph retrieval is optional: if Neo4j is
+    #     unavailable, continue with vector results.
     # --------------------------------------------------
 
     stage_start = time.perf_counter()
 
     if best_match:
-        neo4j_graph = Neo4jGraph()
+        neo4j_graph = None
 
         try:
+            neo4j_graph = Neo4jGraph()
             result = neo4j_graph.query_entity(best_match)
 
             if result is not None:
                 graph_results.append(result)
 
+        except Exception as exc:
+            print(
+                "Neo4j unavailable; continuing with "
+                f"vector retrieval. Error: {exc}"
+            )
+
         finally:
-            neo4j_graph.close()
+            if neo4j_graph is not None:
+                try:
+                    neo4j_graph.close()
+                except Exception as exc:
+                    print(f"Neo4j close warning: {exc}")
 
     timings["graph_query"] = time.perf_counter() - stage_start
 

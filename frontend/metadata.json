@@ -1,0 +1,6 @@
+{
+  "name": "CyberGuard AI",
+  "description": "Self-Correcting Cyber Threat Intelligence Workspace for evidence-grounded threat analysis, vector and graph RAG, and self-correcting validation.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

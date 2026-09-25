@@ -15,7 +15,9 @@ def run_self_correction(query, limit=5):
                 "sufficient": False,
                 "coverage": "none",
                 "consistency": "unknown",
-                "missing_information": ["A valid query was not provided."],
+                "missing_information": [
+                    "A valid query was not provided."
+                ],
                 "conflicts": [],
                 "unsupported_claims": [],
                 "reason": "The query is empty or invalid.",
@@ -24,13 +26,17 @@ def run_self_correction(query, limit=5):
             "confidence": "LOW",
             "confidence_reason": "A valid query was not provided.",
             "retry_count": 0,
+            "correction_exhausted": False,
         }
 
     current_query = query
     retry_count = 0
 
     while True:
-        retrieval_result = search_documents(current_query, limit=limit)
+        retrieval_result = search_documents(
+            current_query,
+            limit=limit
+        )
 
         documents = retrieval_result.get("documents", [])
         graph = retrieval_result.get("graph", [])
@@ -43,9 +49,48 @@ def run_self_correction(query, limit=5):
 
         confidence_result = check_confidence(reasoning_result)
 
+        # ---------------------------------------------------------
+        # IMPORTANT:
+        # If the Reasoning Agent could not run because Gemini is
+        # unavailable, do NOT retry the entire retrieval pipeline.
+        # The retrieved evidence can still be used by the local
+        # fallback answer generator.
+        # ---------------------------------------------------------
+        if reasoning_result.get("used_fallback", False):
+            return {
+                "query": query,
+                "retrieval_query": current_query,
+                "documents": documents,
+                "graph": graph,
+                "reasoning": reasoning_result,
+                "confidence": "LOW",
+                "confidence_reason": (
+                    "Reasoning could not be evaluated because "
+                    "the reasoning model was unavailable. "
+                    "Retrieved evidence is available for fallback."
+                ),
+                "retry_count": retry_count,
+                "correction_exhausted": False,
+                "reasoning_unavailable": True,
+
+                # Retrieval metadata
+                "intent": retrieval_result.get("intent"),
+                "expanded_query": retrieval_result.get(
+                    "expanded_query"
+                ),
+                "retrieval_used_fallback": retrieval_result.get(
+                    "used_fallback",
+                    False,
+                ),
+            }
+
+        # ---------------------------------------------------------
+        # Normal self-correction path
+        # ---------------------------------------------------------
         if (
             reasoning_result.get("sufficient", False)
-            and confidence_result["confidence"] in {"HIGH", "MEDIUM"}
+            and confidence_result["confidence"]
+            in {"HIGH", "MEDIUM"}
         ):
             return {
                 "query": query,
@@ -56,15 +101,22 @@ def run_self_correction(query, limit=5):
                 "confidence": confidence_result["confidence"],
                 "confidence_reason": confidence_result["reason"],
                 "retry_count": retry_count,
+                "correction_exhausted": False,
 
                 # Retrieval metadata
                 "intent": retrieval_result.get("intent"),
-                "expanded_query": retrieval_result.get("expanded_query"),
+                "expanded_query": retrieval_result.get(
+                    "expanded_query"
+                ),
                 "retrieval_used_fallback": retrieval_result.get(
-                    "used_fallback", False
+                    "used_fallback",
+                    False,
                 ),
             }
 
+        # ---------------------------------------------------------
+        # Maximum self-correction attempts reached
+        # ---------------------------------------------------------
         if retry_count >= MAX_RETRIES:
             return {
                 "query": query,
@@ -79,17 +131,27 @@ def run_self_correction(query, limit=5):
 
                 # Retrieval metadata
                 "intent": retrieval_result.get("intent"),
-                "expanded_query": retrieval_result.get("expanded_query"),
+                "expanded_query": retrieval_result.get(
+                    "expanded_query"
+                ),
                 "retrieval_used_fallback": retrieval_result.get(
-                    "used_fallback", False
+                    "used_fallback",
+                    False,
                 ),
             }
 
+        # ---------------------------------------------------------
+        # Evidence is insufficient but reasoning itself worked.
+        # This is when self-correction should actually happen.
+        # ---------------------------------------------------------
         missing_information = reasoning_result.get(
-            "missing_information", []
+            "missing_information",
+            [],
         )
+
         unsupported_claims = reasoning_result.get(
-            "unsupported_claims", []
+            "unsupported_claims",
+            [],
         )
 
         refinement_parts = [query]

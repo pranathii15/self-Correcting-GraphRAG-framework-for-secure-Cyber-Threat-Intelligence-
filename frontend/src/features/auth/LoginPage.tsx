@@ -1,0 +1,183 @@
+import React, { useState } from 'react';
+import { Lock, Mail, ArrowRight, Loader2, AlertCircle, Eye, EyeOff } from 'lucide-react';
+import { GeometricLogo } from '../../components/common/GeometricLogo';
+import { loginUser } from '../../lib/api/auth';
+
+interface LoginPageProps {
+  onLoginSuccess: () => void;
+  onNavigateToRegister: () => void;
+}
+
+export const LoginPage: React.FC<LoginPageProps> = ({
+  onLoginSuccess,
+  onNavigateToRegister,
+}) => {
+  const [identifier, setIdentifier] = useState('');
+  const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setErrorMessage(null);
+
+    const cleanIdentifier = identifier.trim();
+    if (!cleanIdentifier) {
+      setErrorMessage('Please enter your email or username.');
+      return;
+    }
+    if (!password) {
+      setErrorMessage('Please enter your password.');
+      return;
+    }
+
+    setIsLoading(true);
+    try {
+      await loginUser({
+        email: cleanIdentifier.includes('@') ? cleanIdentifier : undefined,
+        username: !cleanIdentifier.includes('@') ? cleanIdentifier : undefined,
+        password: password,
+      });
+
+      onLoginSuccess();
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Invalid credentials. Please try again.';
+      setErrorMessage(msg);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  return (
+    <div className="min-h-screen w-screen bg-[#F7F8FA] text-[#292C33] flex flex-col justify-between items-center relative overflow-hidden font-sans select-none">
+      {/* Subtle atmospheric ambient glow matching CyberGuard aesthetic */}
+      <div
+        className="pointer-events-none absolute top-1/3 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[700px] h-[400px] rounded-full bg-gradient-to-tr from-[#ECEBFF]/50 via-[#EAF3FF]/40 to-transparent blur-3xl -z-10"
+        aria-hidden="true"
+      />
+
+      {/* Top Bar / Brand header */}
+      <div className="w-full max-w-5xl px-6 py-6 flex items-center justify-center">
+        <div className="flex items-center gap-3">
+          <GeometricLogo size={30} />
+          <span className="font-semibold text-[16px] tracking-tight text-[#292C33]">
+            CyberGuard AI
+          </span>
+        </div>
+      </div>
+
+      {/* Main Card */}
+      <div className="w-full max-w-[420px] px-4 py-8 my-auto">
+        <div className="bg-white border border-[#E7E8ED] rounded-2xl shadow-xl p-7 sm:p-8 flex flex-col">
+          {/* Card Brand Header */}
+          <div className="flex flex-col items-center text-center mb-6">
+            <div className="w-12 h-12 rounded-2xl bg-[#ECEBFF] flex items-center justify-center mb-3">
+              <GeometricLogo size={26} />
+            </div>
+            <h1 className="text-xl font-semibold text-[#292C33] tracking-tight">
+              Sign in to CyberGuard AI
+            </h1>
+            <p className="text-xs text-[#737782] mt-1 font-normal">
+              Enter your credentials to access the intelligence platform
+            </p>
+          </div>
+
+          {/* Error Banner */}
+          {errorMessage && (
+            <div className="mb-5 p-3 rounded-xl bg-[#FCEBED] border border-[#F8D2D7] text-xs text-[#B83E4C] flex items-start gap-2.5">
+              <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+              <span className="leading-relaxed">{errorMessage}</span>
+            </div>
+          )}
+
+          {/* Form */}
+          <form onSubmit={handleSubmit} className="flex flex-col gap-4">
+            <div className="flex flex-col gap-1.5">
+              <label className="text-xs font-medium text-[#292C33]">
+                Email or Username
+              </label>
+              <div className="relative">
+                <Mail className="w-4 h-4 text-[#9A9DA6] absolute left-3 top-1/2 -translate-y-1/2" />
+                <input
+                  type="text"
+                  value={identifier}
+                  onChange={(e) => setIdentifier(e.target.value)}
+                  placeholder="analyst@enterprise.local or username"
+                  autoComplete="username"
+                  disabled={isLoading}
+                  className="w-full pl-9 pr-3 py-2 bg-[#FAFAFC] border border-[#E7E8ED] rounded-xl text-xs text-[#292C33] placeholder-[#9A9DA6] focus:outline-none focus:border-[#625FEF] focus:bg-white transition-colors"
+                />
+              </div>
+            </div>
+
+            <div className="flex flex-col gap-1.5">
+              <div className="flex items-center justify-between">
+                <label className="text-xs font-medium text-[#292C33]">
+                  Password
+                </label>
+              </div>
+              <div className="relative">
+                <Lock className="w-4 h-4 text-[#9A9DA6] absolute left-3 top-1/2 -translate-y-1/2" />
+                <input
+                  type={showPassword ? 'text' : 'password'}
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  placeholder="••••••••••••"
+                  autoComplete="current-password"
+                  disabled={isLoading}
+                  className="w-full pl-9 pr-10 py-2 bg-[#FAFAFC] border border-[#E7E8ED] rounded-xl text-xs text-[#292C33] placeholder-[#9A9DA6] focus:outline-none focus:border-[#625FEF] focus:bg-white transition-colors font-mono"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword(!showPassword)}
+                  className="p-1 text-[#9A9DA6] hover:text-[#292C33] absolute right-2.5 top-1/2 -translate-y-1/2 transition-colors"
+                  aria-label={showPassword ? 'Hide password' : 'Show password'}
+                >
+                  {showPassword ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                </button>
+              </div>
+            </div>
+
+            <button
+              type="submit"
+              disabled={isLoading}
+              className="mt-2 w-full py-2.5 bg-[#625FEF] hover:bg-[#524FE0] text-white rounded-xl text-xs font-semibold shadow-xs flex items-center justify-center gap-2 transition-colors disabled:opacity-50"
+            >
+              {isLoading ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  <span>Authenticating...</span>
+                </>
+              ) : (
+                <>
+                  <span>Sign In</span>
+                  <ArrowRight className="w-3.5 h-3.5" />
+                </>
+              )}
+            </button>
+          </form>
+
+          {/* Switch to Registration */}
+          <div className="mt-6 pt-5 border-t border-[#F3F4F7] text-center">
+            <p className="text-xs text-[#737782]">
+              Don&apos;t have an analyst account?{' '}
+              <button
+                type="button"
+                onClick={onNavigateToRegister}
+                className="font-medium text-[#625FEF] hover:underline"
+              >
+                Register here
+              </button>
+            </p>
+          </div>
+        </div>
+      </div>
+
+      {/* Footer */}
+      <div className="w-full max-w-5xl px-6 py-5 text-center text-[11px] text-[#9A9DA6]">
+        CyberGuard AI · Protected Threat Intelligence Platform
+      </div>
+    </div>
+  );
+};

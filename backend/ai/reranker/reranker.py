@@ -1,5 +1,5 @@
-
 from sentence_transformers import CrossEncoder
+
 
 MODEL_NAME = "BAAI/bge-reranker-base"
 
@@ -14,7 +14,7 @@ def rerank(query, documents, top_k=5):
         - text
         - filename
 
-    Returns ranked documents with an additional:
+    Returns ranked documents with:
         - rerank_score
     """
 
@@ -29,12 +29,16 @@ def rerank(query, documents, top_k=5):
         for document in documents
     ]
 
-    scores = reranker.predict(pairs)
+    scores = reranker.predict(
+        pairs,
+        batch_size=8,
+        show_progress_bar=False,
+    )
 
     ranked = sorted(
         zip(documents, scores),
         key=lambda x: float(x[1]),
-        reverse=True
+        reverse=True,
     )
 
     results = []

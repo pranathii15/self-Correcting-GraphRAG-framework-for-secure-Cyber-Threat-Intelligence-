@@ -1,7 +1,14 @@
-from fastapi import APIRouter, UploadFile, File, HTTPException
+from pathlib import Path
 
-from app.services.file_service import save_uploaded_file
+from fastapi import APIRouter, UploadFile, File, HTTPException
+from fastapi.responses import FileResponse
+
+from app.services.file_service import (
+    save_uploaded_file,
+    UPLOAD_DIR,
+)
 from app.services.document_pipeline import process_document
+
 
 router = APIRouter(
     prefix="/documents",
@@ -43,4 +50,91 @@ async def upload_document(
         raise HTTPException(
             status_code=500,
             detail=str(error)
+        )
+
+
+@router.get("/")
+async def list_documents():
+    """Return all uploaded files."""
+    try:
+        UPLOAD_DIR.mkdir(
+            parents=True,
+            exist_ok=True
+        )
+
+        files = []
+
+        for file_path in UPLOAD_DIR.iterdir():
+            if file_path.is_file():
+                files.append({
+                    "stored_filename": file_path.name,
+                    "original_filename": file_path.name.split("_", 1)[-1],
+                    "file_type": file_path.suffix.lower(),
+                    "size": file_path.stat().st_size
+                })
+
+        return {
+            "status": "success",
+            "documents": files
+        }
+
+    except Exception as error:
+        raise HTTPException(
+            status_code=500,
+            detail=str(error)
+        )
+
+
+@router.get("/{filename}/download")
+async def download_document(filename: str):
+    """Download an uploaded file."""
+    file_path = UPLOAD_DIR / filename
+
+    if not file_path.is_file():
+        raise HTTPException(
+            status_code=404,
+            detail="File not found"
+        )
+
+    return FileResponse(
+        path=file_path,
+        filename=file_path.name,
+        media_type="application/octet-stream"
+    )
+
+
+@router.get("/{filename}/preview")
+async def preview_document(filename: str):
+    """Return a text/JSON file for browser preview."""
+    file_path = UPLOAD_DIR / filename
+
+    if not file_path.is_file():
+        raise HTTPException(
+            status_code=404,
+            detail="File not found"
+        )
+
+    extension = file_path.suffix.lower()
+
+    if extension not in {".txt", ".json"}:
+        raise HTTPException(
+            status_code=400,
+            detail="Preview is currently supported only for TXT and JSON files"
+        )
+
+    try:
+        content = file_path.read_text(
+            encoding="utf-8"
+        )
+
+        return {
+            "filename": file_path.name,
+            "file_type": extension,
+            "content": content
+        }
+
+    except UnicodeDecodeError:
+        raise HTTPException(
+            status_code=400,
+            detail="File could not be decoded as UTF-8"
         )

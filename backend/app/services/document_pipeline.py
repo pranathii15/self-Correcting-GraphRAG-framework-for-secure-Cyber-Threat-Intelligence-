@@ -2,7 +2,7 @@ from pathlib import Path
 
 from ai.rag.loader import load_document
 from ai.rag.splitter import chunk_text
-from ai.rag.embeddings import generate_embeddings
+from ai.vectorstore.qdrant_store import store_embeddings
 
 
 def process_document(file_path: str):
@@ -12,8 +12,7 @@ def process_document(file_path: str):
     Steps:
     1. Load document
     2. Split into chunks
-    3. Generate embeddings
-    4. Return processing summary
+    3. Store chunks in Qdrant using Cloud Inference
     """
 
     # Load document
@@ -22,14 +21,16 @@ def process_document(file_path: str):
     # Split into chunks
     chunks = chunk_text(text)
 
-    # Generate embeddings
-    embeddings = generate_embeddings(chunks)
+    # Store chunks + generate embeddings through Qdrant Cloud Inference
+    store_embeddings(
+        chunks,
+        Path(file_path).name,
+    )
 
     return {
         "filename": Path(file_path).name,
         "characters": len(text),
         "chunks": len(chunks),
-        "embeddings": len(embeddings),
+        "embeddings": len(chunks),
         "chunk_texts": chunks,
-        "embedding_vectors": embeddings,
     }

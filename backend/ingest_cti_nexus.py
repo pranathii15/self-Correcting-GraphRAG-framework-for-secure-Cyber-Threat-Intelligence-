@@ -2,10 +2,9 @@ from pathlib import Path
 
 from ai.rag.loader import load_document
 from ai.rag.splitter import chunk_text
-from ai.rag.embeddings import generate_embeddings
 
 from ai.vectorstore.qdrant_store import (
-    create_collection,
+    reset_collection,
     store_embeddings,
 )
 
@@ -14,7 +13,8 @@ DATASET_PATH = Path("../data/cti_nexus/demo")
 
 def ingest_dataset():
 
-    create_collection()
+    # Rebuild the collection using the new MiniLM embeddings.
+    reset_collection()
 
     total_files = 0
     total_chunks = 0
@@ -33,24 +33,22 @@ def ingest_dataset():
         print(f"\nProcessing {file_path.name}")
 
         try:
-
             text = load_document(str(file_path))
 
             chunks = chunk_text(text)
 
-            embeddings = generate_embeddings(chunks)
-
-            store_embeddings(chunks,embeddings,file_path.name)
+            # Qdrant Cloud Inference generates the embeddings.
+            store_embeddings(
+                chunks,
+                file_path.name,
+            )
 
             total_files += 1
             total_chunks += len(chunks)
 
-            print(
-                f"✓ {len(chunks)} chunks stored."
-            )
+            print(f"✓ {len(chunks)} chunks stored.")
 
         except Exception as e:
-
             print(f"✗ Failed: {e}")
 
     print("\n------------------------")

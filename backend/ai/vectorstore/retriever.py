@@ -3,27 +3,37 @@ import json
 import re
 import time
 from pathlib import Path
+
 from dotenv import load_dotenv
-from qdrant_client import QdrantClient
-from sentence_transformers import SentenceTransformer
+from qdrant_client import QdrantClient, models
 
 from ai.reranker.reranker import rerank
 from ai.agents.query_agent import understand_query
 from ai.graph_rag.neo4j_store import Neo4jGraph
+
 load_dotenv()
 
-MODEL_NAME = "BAAI/bge-small-en-v1.5"
+
+# --------------------------------------------------
+# Qdrant Cloud Configuration
+# --------------------------------------------------
+
 QDRANT_URL = os.getenv("QDRANT_URL")
 QDRANT_API_KEY = os.getenv("QDRANT_API_KEY")
+
+EMBEDDING_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
+
 client = QdrantClient(
     url=QDRANT_URL,
     api_key=QDRANT_API_KEY,
+    cloud_inference=True,
 )
+
 COLLECTION_NAME = "cti_documents"
+
 DATASET_PATH = Path("../data/cti_nexus/demo")
+
 MIN_RERANK_SCORE = 0.05
-# Model is loaded when this module is imported.
-model = SentenceTransformer(MODEL_NAME)
 
 
 def search_documents(query: str, limit: int = 5):
@@ -49,15 +59,16 @@ def search_documents(query: str, limit: int = 5):
     )
 
     # --------------------------------------------------
-    # 2. Generate query embedding
+    # 2. Generate query embedding using Qdrant Cloud
+    #    Inference
     # --------------------------------------------------
 
     stage_start = time.perf_counter()
 
-    query_embedding = model.encode(
-        retrieval_query,
-        normalize_embeddings=True
-    ).tolist()
+    query_embedding = models.Document(
+        text=retrieval_query,
+        model=EMBEDDING_MODEL,
+    )
 
     timings["embedding"] = time.perf_counter() - stage_start
 
@@ -73,15 +84,31 @@ def search_documents(query: str, limit: int = 5):
         limit=50,
     )
 
-    documents = [
-        {
-            "text": point.payload["text"],
-            "filename": point.payload["filename"]
-        }
-        for point in results.points
-    ]
+    documents = []
 
-    timings["qdrant_search"] = time.perf_counter() - stage_start
+    for point in results.points:
+        payload = point.payload or {}
+
+        text = payload.get("text", "")
+        filename = payload.get(
+            "filename",
+            "Unknown source",
+        )
+
+        if not isinstance(text, str) or not text.strip():
+            continue
+
+        documents.append(
+            {
+                "text": text,
+                "filename": filename,
+            }
+        )
+
+    timings["qdrant_search"] = (
+        time.perf_counter() - stage_start
+    )
+
     candidate_count = len(documents)
 
     # --------------------------------------------------
@@ -94,13 +121,18 @@ def search_documents(query: str, limit: int = 5):
     seen_texts = set()
 
     for document in documents:
-        if document["text"] not in seen_texts:
+        text = document["text"]
+
+        if text not in seen_texts:
             unique_documents.append(document)
-            seen_texts.add(document["text"])
+            seen_texts.add(text)
 
     documents = unique_documents
 
-    timings["deduplication"] = time.perf_counter() - stage_start
+    timings["deduplication"] = (
+        time.perf_counter() - stage_start
+    )
+
     unique_count = len(documents)
 
     # --------------------------------------------------
@@ -108,6 +140,7 @@ def search_documents(query: str, limit: int = 5):
     # --------------------------------------------------
 
     stage_start = time.perf_counter()
+
     RERANK_CANDIDATES = 5
 
     documents = rerank(
@@ -116,7 +149,9 @@ def search_documents(query: str, limit: int = 5):
         top_k=RERANK_CANDIDATES,
     )
 
-    timings["reranking"] = time.perf_counter() - stage_start
+    timings["reranking"] = (
+        time.perf_counter() - stage_start
+    )
 
     # --------------------------------------------------
     # 6. Filter weak matches using reranker scores
@@ -127,11 +162,15 @@ def search_documents(query: str, limit: int = 5):
     documents = [
         document
         for document in documents
-        if document.get("rerank_score", float("-inf"))
-        >= MIN_RERANK_SCORE
+        if document.get(
+            "rerank_score",
+            float("-inf"),
+        ) >= MIN_RERANK_SCORE
     ]
 
-    timings["score_filtering"] = time.perf_counter() - stage_start
+    timings["score_filtering"] = (
+        time.perf_counter() - stage_start
+    )
 
     # --------------------------------------------------
     # 7. Source diversity
@@ -159,7 +198,9 @@ def search_documents(query: str, limit: int = 5):
         if len(diverse_documents) >= limit:
             break
 
-    timings["source_diversity"] = time.perf_counter() - stage_start
+    timings["source_diversity"] = (
+        time.perf_counter() - stage_start
+    )
 
     # --------------------------------------------------
     # 8. Prepare graph matching
@@ -167,7 +208,9 @@ def search_documents(query: str, limit: int = 5):
 
     graph_results = []
 
-    query_normalized = " ".join(original_query.casefold().split())
+    query_normalized = " ".join(
+        original_query.casefold().split()
+    )
 
     GENERIC_ENTITIES = {
         "ransomware",
@@ -195,13 +238,25 @@ def search_documents(query: str, limit: int = 5):
         if not entity_normalized:
             return False
 
-        escaped_entity = re.escape(entity_normalized)
-        pattern = rf"(?<!\w){escaped_entity}(?!\w)"
+        escaped_entity = re.escape(
+            entity_normalized
+        )
 
-        return re.search(pattern, query_normalized) is not None
+        pattern = (
+            rf"(?<!\w){escaped_entity}(?!\w)"
+        )
+
+        return (
+            re.search(
+                pattern,
+                query_normalized,
+            )
+            is not None
+        )
 
     # --------------------------------------------------
-    # 9. Find the best matching entity in retrieved files
+    # 9. Find the best matching entity
+    #    in retrieved files
     # --------------------------------------------------
 
     stage_start = time.perf_counter()
@@ -217,7 +272,10 @@ def search_documents(query: str, limit: int = 5):
         if not file_path.exists():
             continue
 
-        with open(file_path, encoding="utf-8") as file:
+        with open(
+            file_path,
+            encoding="utf-8",
+        ) as file:
             data = json.load(file)
 
         for entity in data.get("entities", []):
@@ -240,16 +298,20 @@ def search_documents(query: str, limit: int = 5):
 
             if len(entity_normalized) > best_match_length:
                 best_match = entity_name
-                best_match_length = len(entity_normalized)
+                best_match_length = len(
+                    entity_normalized
+                )
 
     timings["graph_build_and_matching"] = (
         time.perf_counter() - stage_start
     )
 
     # --------------------------------------------------
-    # 10. Query Neo4j for the matching entity.
-    #     Graph retrieval is optional: if Neo4j is
-    #     unavailable, continue with vector results.
+    # 10. Query Neo4j for matching entity
+    #
+    # Graph retrieval is optional.
+    # If Neo4j is unavailable, continue with
+    # vector retrieval.
     # --------------------------------------------------
 
     stage_start = time.perf_counter()
@@ -259,7 +321,10 @@ def search_documents(query: str, limit: int = 5):
 
         try:
             neo4j_graph = Neo4jGraph()
-            result = neo4j_graph.query_entity(best_match)
+
+            result = neo4j_graph.query_entity(
+                best_match
+            )
 
             if result is not None:
                 graph_results.append(result)
@@ -275,30 +340,64 @@ def search_documents(query: str, limit: int = 5):
                 try:
                     neo4j_graph.close()
                 except Exception as exc:
-                    print(f"Neo4j close warning: {exc}")
+                    print(
+                        f"Neo4j close warning: {exc}"
+                    )
 
-    timings["graph_query"] = time.perf_counter() - stage_start
+    timings["graph_query"] = (
+        time.perf_counter() - stage_start
+    )
 
     # --------------------------------------------------
     # 11. Log timings
     # --------------------------------------------------
 
-    total_time = time.perf_counter() - total_start
+    total_time = (
+        time.perf_counter() - total_start
+    )
 
-    print("\n========== RETRIEVER TIMING ==========")
+    print(
+        "\n========== RETRIEVER TIMING =========="
+    )
 
     for stage, duration in timings.items():
-        print(f"{stage:28s}: {duration:8.2f} seconds")
+        print(
+            f"{stage:28s}: "
+            f"{duration:8.2f} seconds"
+        )
 
-    print(f"{'Qdrant candidates':28s}: {candidate_count}")
-    print(f"{'Unique documents':28s}: {unique_count}")
-    print(f"{'Selected documents':28s}: {len(diverse_documents)}")
-    print(f"{'Graph entities checked':28s}: {graph_entities_checked}")
-    print(f"{'Total retrieval':28s}: {total_time:8.2f} seconds")
-    print("======================================\n")
+    print(
+        f"{'Qdrant candidates':28s}: "
+        f"{candidate_count}"
+    )
+
+    print(
+        f"{'Unique documents':28s}: "
+        f"{unique_count}"
+    )
+
+    print(
+        f"{'Selected documents':28s}: "
+        f"{len(diverse_documents)}"
+    )
+
+    print(
+        f"{'Graph entities checked':28s}: "
+        f"{graph_entities_checked}"
+    )
+
+    print(
+        f"{'Total retrieval':28s}: "
+        f"{total_time:8.2f} seconds"
+    )
+
+    print(
+        "======================================\n"
+    )
 
     # --------------------------------------------------
-    # 12. Return retrieval + graph + query understanding
+    # 12. Return retrieval + graph +
+    #     query understanding
     # --------------------------------------------------
 
     return {
@@ -308,5 +407,5 @@ def search_documents(query: str, limit: int = 5):
         "expanded_query": expanded_query,
         "used_fallback": used_fallback,
         "documents": diverse_documents,
-        "graph": graph_results
+        "graph": graph_results,
     }

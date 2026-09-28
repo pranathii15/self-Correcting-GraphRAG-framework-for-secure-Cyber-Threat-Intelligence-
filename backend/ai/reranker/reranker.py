@@ -1,14 +1,83 @@
-from sentence_transformers import CrossEncoder
+import math
+import re
 
 
-MODEL_NAME = "BAAI/bge-reranker-base"
+def _tokenize(text):
+    """
+    Convert text into normalized word tokens.
+    """
+    return set(
+        re.findall(
+            r"\b[a-zA-Z0-9][a-zA-Z0-9_-]*\b",
+            text.lower(),
+        )
+    )
 
-reranker = CrossEncoder(MODEL_NAME)
+
+def _score_document(query, document):
+    """
+    Calculate a lightweight lexical relevance score.
+
+    The score combines:
+    - query-term overlap
+    - filename matches
+    - phrase matches
+    """
+
+    query_tokens = _tokenize(query)
+
+    if not query_tokens:
+        return 0.0
+
+    text = document.get("text", "")
+    filename = document.get("filename", "")
+
+    text_tokens = _tokenize(text)
+    filename_tokens = _tokenize(filename)
+
+    # Query terms appearing in the document.
+    overlap = query_tokens.intersection(text_tokens)
+
+    # Basic recall-style score.
+    overlap_score = len(overlap) / len(query_tokens)
+
+    # Give a small boost when query terms occur in the filename.
+    filename_overlap = query_tokens.intersection(
+        filename_tokens
+    )
+
+    filename_score = (
+        len(filename_overlap) / len(query_tokens)
+    )
+
+    # Phrase match gives an additional small boost.
+    normalized_query = " ".join(
+        query.lower().split()
+    )
+    normalized_text = " ".join(
+        text.lower().split()
+    )
+
+    phrase_score = (
+        1.0
+        if normalized_query
+        and normalized_query in normalized_text
+        else 0.0
+    )
+
+    # Final lightweight score.
+    score = (
+        0.75 * overlap_score
+        + 0.20 * filename_score
+        + 0.05 * phrase_score
+    )
+
+    return float(score)
 
 
 def rerank(query, documents, top_k=5):
     """
-    Rerank retrieved documents using a CrossEncoder.
+    Lightweight CPU-friendly document reranker.
 
     Each document contains:
         - text
@@ -21,31 +90,23 @@ def rerank(query, documents, top_k=5):
     if not documents:
         return []
 
-    pairs = [
-        (
-            query,
-            f"{document['filename']} {document['text']}"
-        )
-        for document in documents
-    ]
+    scored_documents = []
 
-    scores = reranker.predict(
-        pairs,
-        batch_size=8,
-        show_progress_bar=False,
-    )
+    for document in documents:
+        score = _score_document(
+            query,
+            document,
+        )
+
+        result = document.copy()
+        result["rerank_score"] = score
+
+        scored_documents.append(result)
 
     ranked = sorted(
-        zip(documents, scores),
-        key=lambda x: float(x[1]),
+        scored_documents,
+        key=lambda document: document["rerank_score"],
         reverse=True,
     )
 
-    results = []
-
-    for document, score in ranked[:top_k]:
-        result = document.copy()
-        result["rerank_score"] = float(score)
-        results.append(result)
-
-    return results
+    return ranked[:top_k]
